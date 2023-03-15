@@ -1,59 +1,97 @@
+/*************************************
+ * Filename:  sketch_heart_beat.ino
+ * Author:    Alexandros Rikos
+ *************************************/
+ 
 #include <stdint.h>
 #include <string.h>
 
 #define BAUD_RATE 9600
-#define RECEIVE_TIMEOUT_MS 2000
+#define RECEIVE_TIMEOUT_MS 500
 #define START_BYTE 0xAA
 
 #define SIZE_OF_COMMAND_FRAME 3
 #define SIZE_OF_RESPONSE_FRAME 3
 
+#define POSITION_OF_START_BYTE 0
+#define POSITION_OF_FRAME_TYPE 1
+#define POSITION_OF_COMMAND_ID 2
+#define POSITION_OF_ACK_CODE 2
+
 enum STATE 
 {
   S01_IDLE = 0,
-  S02_RECEIVE_FRAME = 1,
-  S03_TRANSMIT_FRAME = 2,
+  S02_RECEIVE_FRAME,
+  S03_WAIT_FOR_RESPONSE,
+  S04_TRANSMIT_FRAME,
 };
 
 enum ERROR_CODE
 {
   NO_ERROR = 0x00,
-  RECEIVE_TIMEOUT = 0x01,
+  RECEIVE_TIMEOUT,
+  UNKNOWN_FRAME_TYPE,
+  UNKNOWN_COMMAND,
 };
 
 enum FRAME_TYPE
 {
   FRAME_TYPE_COMMAND = 0x01,
-  FRAME_TYPE_RESPONSE = 0x02,
+  FRAME_TYPE_RESPONSE,
 };
 
 static uint8_t au8CommandFrame[SIZE_OF_COMMAND_FRAME] = {0};
 static uint8_t au8ResponseFrame[SIZE_OF_RESPONSE_FRAME] = {0};
 
-// function prototypes
-void vExecuteStateMachine(void);
+static bool blFrameReceived = false;
+static bool blSendResponse = false;
 
-// setup function
+// -------------------
+// function prototypes
+// -------------------
+void vExecuteStateMachine(void);
+void vHandleReceivedFrame(void);
+void vPrepareResponseFrame(enum ERROR_CODE eErrorCode);
+
+/* setup
+ * -----
+ * The setup function is executed once after startup.
+ * 
+ * param[in]: None
+ * param[out]: None
+ */
 void setup() {
-  // put your setup code here, to run once:
   Serial.begin(BAUD_RATE);
 }
 
-// loop function
+/* loop
+ * ----
+ * The loop function is be executed again and again.
+ * 
+ * param[in]: None
+ * param[out]: None
+ */
 void loop() 
 {
   vExecuteStateMachine();  
-  
-  /* 
-  if command_received: handle the command
-  else nothing
-  
-  if output_enabled: send data
-  if flag #2: do thing nr 2
-  */
+
+  // if a frame has been received, handle the frame
+  if (blFrameReceived == true)
+  {
+    blFrameReceived = false;
+    vHandleReceivedFrame();
+    // ready to send a response
+    blSendResponse = true;
+  }
 }
 
-// vExecuteStateMachine: receives command and sends a response
+/* vExecuteStateMachine
+ * --------------------
+ * Executes state machine that receives frames and sends responses. 
+ * 
+ * param[in]: None
+ * param[out]: None
+ */
 void vExecuteStateMachine(void)
 {
   static enum STATE eState = S01_IDLE;
@@ -93,27 +131,31 @@ void vExecuteStateMachine(void)
       // check whether all bytes have been received
       if (u8NrOfReceivedBytes >= SIZE_OF_COMMAND_FRAME)
       {
-        eErrorCode = NO_ERROR;
-        eState = S03_TRANSMIT_FRAME;
+        blFrameReceived = true;
+        eState = S04_TRANSMIT_FRAME;
       }
       // check whether a timeout has occurred
       else if (millis() - u16Tstart >= RECEIVE_TIMEOUT_MS)
       {
-        eErrorCode = RECEIVE_TIMEOUT;
-        eState = S03_TRANSMIT_FRAME;
+        vPrepareResponseFrame(RECEIVE_TIMEOUT);
+        eState = S04_TRANSMIT_FRAME;
       }
       break;
     }
-	
-    case S03_TRANSMIT_FRAME:
-    {
-      // build the response frame
-      au8ResponseFrame[0] = START_BYTE;
-      au8ResponseFrame[1] = FRAME_TYPE_RESPONSE;
-      au8ResponseFrame[2] = eErrorCode;
 
+    case S03_WAIT_FOR_RESPONSE:
+    {
+      if (blSendResponse == true)
+      {
+        eState = S04_TRANSMIT_FRAME;
+      }
+    }
+	
+    case S04_TRANSMIT_FRAME:
+    {
       // send the response frame
       Serial.write(au8ResponseFrame, SIZE_OF_RESPONSE_FRAME);
+      blSendResponse = false;
 
       // reset command frame, response frame and nr of received bytes
       memset(au8CommandFrame, 0, SIZE_OF_COMMAND_FRAME);
@@ -131,4 +173,58 @@ void vExecuteStateMachine(void)
       break;
     }
   }
+}
+
+/* vHandleReceivedFrame
+ * --------------------
+ * Handles the received frame and prepares the response frame.
+ * 
+ * param[in]: None
+ * param[out]: None
+ */
+void vHandleReceivedFrame(void)
+{
+  enum ERROR_CODE eErrorCode = NO_ERROR;
+
+  if (au8CommandFrame[POSITION_OF_FRAME_TYPE] == FRAME_TYPE_COMMAND)
+  {
+    switch (au8CommandFrame[POSITION_OF_COMMAND_ID])
+    {
+      case 0x01:
+      {
+        break;
+      }
+      case 0x02:
+      {
+        break;
+      }
+      default:
+      {
+        eErrorCode = UNKNOWN_COMMAND;
+      }
+    }
+  }
+  else
+  {
+    eErrorCode = UNKNOWN_FRAME_TYPE;
+  }
+
+  vPrepareResponseFrame(eErrorCode);
+}
+
+/* vPrepareResponseFrame
+ * ---------------------
+ * Prepares the response frame.
+ * 
+ * param[in] eErrorCode: The acknowledgment code that will be written in the response frame.
+ * param[out]: None
+ */
+void vPrepareResponseFrame(enum ERROR_CODE eErrorCode)
+{
+  au8ResponseFrame[POSITION_OF_START_BYTE] = START_BYTE;
+  au8ResponseFrame[POSITION_OF_FRAME_TYPE] = FRAME_TYPE_RESPONSE;
+  au8ResponseFrame[POSITION_OF_ACK_CODE] = eErrorCode;
+
+  // a response is ready to be sent
+  blSendResponse = true;
 }
