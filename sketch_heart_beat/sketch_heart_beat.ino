@@ -10,38 +10,43 @@
 #define RECEIVE_TIMEOUT_MS 500
 #define START_BYTE 0xAA
 
+#define BUFFER_SIZE 4
 #define SIZE_OF_COMMAND_FRAME 3
-#define SIZE_OF_RESPONSE_FRAME 3
+#define SIZE_OF_RESPONSE_FRAME 4
 
+// The fields for start byte, frame type and command ID 
+// are used in command frames and in response frames
 #define POSITION_OF_START_BYTE 0
 #define POSITION_OF_FRAME_TYPE 1
 #define POSITION_OF_COMMAND_ID 2
-#define POSITION_OF_ACK_CODE 2
+
+// The field ack code (error code) is only used in response frames
+#define POSITION_OF_ERROR_CODE 3
 
 enum STATE 
 {
-  S01_IDLE = 0,
+  S01_IDLE = 0x00,
   S02_RECEIVE_FRAME,
   S03_WAIT_FOR_RESPONSE,
-  S04_TRANSMIT_FRAME,
+  S04_TRANSMIT_RESPONSE,
 };
 
 enum ERROR_CODE
 {
   NO_ERROR = 0x00,
-  RECEIVE_TIMEOUT,
   UNKNOWN_FRAME_TYPE,
   UNKNOWN_COMMAND,
+  RECEIVE_TIMEOUT,
 };
 
 enum FRAME_TYPE
 {
-  FRAME_TYPE_COMMAND = 0x01,
-  FRAME_TYPE_RESPONSE,
+  FRAME_TYPE_RESPONSE = 0x00,
+  FRAME_TYPE_COMMAND,
 };
 
-static uint8_t au8CommandFrame[SIZE_OF_COMMAND_FRAME] = {0};
-static uint8_t au8ResponseFrame[SIZE_OF_RESPONSE_FRAME] = {0};
+static uint8_t au8CommandFrame[BUFFER_SIZE] = {0};
+static uint8_t au8ResponseFrame[BUFFER_SIZE] = {0};
 
 static bool blFrameReceived = false;
 static bool blSendResponse = false;
@@ -97,7 +102,6 @@ void vExecuteStateMachine(void)
   static enum STATE eState = S01_IDLE;
   static uint8_t u8NrOfReceivedBytes = 0;
 
-  uint8_t u8Byte = 0;
   static uint16_t u16Tstart = 0;
   static enum ERROR_CODE eErrorCode;
   
@@ -107,15 +111,12 @@ void vExecuteStateMachine(void)
     {
       if (Serial.available() > 0)
       {
-        // read one byte
-        u8Byte = Serial.read();
-      }
-
-      if (u8Byte == START_BYTE)
-      {
-        au8CommandFrame[u8NrOfReceivedBytes++] = u8Byte;
-        u16Tstart = millis();
-        eState = S02_RECEIVE_FRAME;
+        if (Serial.read() == START_BYTE)
+        {
+          au8CommandFrame[u8NrOfReceivedBytes++] = START_BYTE;
+          u16Tstart = millis();
+          eState = S02_RECEIVE_FRAME;
+        }
       }
       break;
     }
@@ -124,21 +125,20 @@ void vExecuteStateMachine(void)
     {
       if (Serial.available() > 0)
       {
-        u8Byte = Serial.read();
-        au8CommandFrame[u8NrOfReceivedBytes++] = u8Byte;
+        au8CommandFrame[u8NrOfReceivedBytes++] = Serial.read();
       }
 
       // check whether all bytes have been received
       if (u8NrOfReceivedBytes >= SIZE_OF_COMMAND_FRAME)
       {
         blFrameReceived = true;
-        eState = S04_TRANSMIT_FRAME;
+        eState = S04_TRANSMIT_RESPONSE;
       }
       // check whether a timeout has occurred
       else if (millis() - u16Tstart >= RECEIVE_TIMEOUT_MS)
       {
         vPrepareResponseFrame(RECEIVE_TIMEOUT);
-        eState = S04_TRANSMIT_FRAME;
+        eState = S04_TRANSMIT_RESPONSE;
       }
       break;
     }
@@ -147,11 +147,11 @@ void vExecuteStateMachine(void)
     {
       if (blSendResponse == true)
       {
-        eState = S04_TRANSMIT_FRAME;
+        eState = S04_TRANSMIT_RESPONSE;
       }
     }
 	
-    case S04_TRANSMIT_FRAME:
+    case S04_TRANSMIT_RESPONSE:
     {
       // send the response frame
       Serial.write(au8ResponseFrame, SIZE_OF_RESPONSE_FRAME);
@@ -223,8 +223,11 @@ void vPrepareResponseFrame(enum ERROR_CODE eErrorCode)
 {
   au8ResponseFrame[POSITION_OF_START_BYTE] = START_BYTE;
   au8ResponseFrame[POSITION_OF_FRAME_TYPE] = FRAME_TYPE_RESPONSE;
-  au8ResponseFrame[POSITION_OF_ACK_CODE] = eErrorCode;
+  // copy the command ID from the received command frame
+  au8ResponseFrame[POSITION_OF_COMMAND_ID] = au8CommandFrame[POSITION_OF_COMMAND_ID];
+  // add an error code to the response frame
+  au8ResponseFrame[POSITION_OF_ERROR_CODE] = eErrorCode;
 
-  // a response is ready to be sent
+  // notify state machine that response is ready to be sent
   blSendResponse = true;
 }
