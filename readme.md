@@ -17,7 +17,7 @@ A communication protocol is used to communicate with the Arduino. The protocol d
 ### Command Frame
 Command frames consist of three fields:
 
-| | | | |
+| | 1 | 2 | 3 |
 | :- | :-: | :-: | :-: |
 |**Field Name** | Start Byte | Frame Type | Command ID |
 |**Field Value** | 0xAA | 0x01 | 0xXX |
@@ -25,7 +25,7 @@ Command frames consist of three fields:
 ### Response Frame
 Response frames consist of four fields:
 
-| | | | | |
+| | 1 | 2 | 3 | 4 |
 | :- | :-: | :-: | :-: | :-: |
 |**Field Name** | Start Byte | Frame Type | Command ID | Error Code |
 |**Field Value** | 0xAA | 0x00 | 0xXX | 0xXX |
